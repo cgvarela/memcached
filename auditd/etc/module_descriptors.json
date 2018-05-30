@@ -1,0 +1,37 @@
+{
+  "modules" : [
+               {
+                "auditd" :    {
+                               "startid" : 4096,
+                               "file" : "memcached/auditd/etc/auditd_descriptor.json",
+                               "header" : "memcached/auditd/auditd_audit_events.h"
+
+                              }
+               },
+               {
+                "ns_server" : {
+                               "startid" : 8192,
+                               "file" : "ns_server/etc/audit_descriptor.json"
+                              }
+               },
+               {
+                "xdcr" : {
+                               "startid" : 16384,
+                               "file" : "goproj/src/github.com/couchbase/goxdcr/etc/audit_descriptor.json"
+                              }
+               },
+               {
+                "memcached" : {
+                               "startid" : 20480,
+                               "file" : "memcached/etc/memcached_descriptor.json",
+                               "header":"memcached/memcached_audit_events.h"
+                              }
+               },
+               {
+                "fts" : {
+                               "startid" :24576,
+                               "file" : "goproj/src/github.com/couchbase/cbft/etc/audit_descriptor.json"
+                              }
+               }
+             ]
+}

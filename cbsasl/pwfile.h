@@ -1,5 +1,5 @@
 /*
- *     Copyright 2013 Couchbase, Inc.
+ *     Copyright 2016 Couchbase, Inc.
  *
  *   Licensed under the Apache License, Version 2.0 (the "License");
  *   you may not use this file except in compliance with the License.
@@ -13,24 +13,21 @@
  *   See the License for the specific language governing permissions and
  *   limitations under the License.
  */
-
-#ifndef SRC_PWFILE_H_
-#define SRC_PWFILE_H_ 1
+#pragma once
 
 #include "cbsasl/cbsasl.h"
+#include "user.h"
+#include <string>
 
-typedef struct user_db_entry {
-    char *username;
-    char *password;
-    char *config;
-    struct user_db_entry *next;
-} user_db_entry_t;
-
-char *find_pw(const char *u, char **cfg);
+/**
+ * Searches for a user entry for the specified user.
+ *
+ * @param user the username to search for
+ * @param user updated with the user information if found
+ * @return true if user exists, false otherwise
+ */
+bool find_user(const std::string& username, cb::sasl::User &user);
 
 cbsasl_error_t load_user_db(void);
 
 void free_user_ht(void);
-void pwfile_init(void);
-
-#endif /*  SRC_PWFILE_H_ */

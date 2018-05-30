@@ -1,0 +1,235 @@
+/* -*- Mode: C++; tab-width: 4; c-basic-offset: 4; indent-tabs-mode: nil -*- */
+/*
+ *     Copyright 2016 Couchbase, Inc.
+ *
+ *   Licensed under the Apache License, Version 2.0 (the "License");
+ *   you may not use this file except in compliance with the License.
+ *   You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *   Unless required by applicable law or agreed to in writing, software
+ *   distributed under the License is distributed on an "AS IS" BASIS,
+ *   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *   See the License for the specific language governing permissions and
+ *   limitations under the License.
+ */
+
+#include "dcp_mutation.h"
+#include "engine_wrapper.h"
+#include "utilities.h"
+#include "../../mcbp.h"
+
+#include <platform/compress.h>
+#include <limits>
+#include <stdexcept>
+#include <xattr/blob.h>
+#include <xattr/utils.h>
+
+ENGINE_ERROR_CODE dcp_message_mutation(const void* void_cookie,
+                                       uint32_t opaque,
+                                       item* it,
+                                       uint16_t vbucket,
+                                       uint64_t by_seqno,
+                                       uint64_t rev_seqno,
+                                       uint32_t lock_time,
+                                       const void* meta,
+                                       uint16_t nmeta,
+                                       uint8_t nru,
+                                       uint8_t collection_len) {
+    auto* c = cookie2mcbp(void_cookie, __func__);
+    c->setCmd(PROTOCOL_BINARY_CMD_DCP_MUTATION);
+    // Use a unique_ptr to make sure we release the item in all error paths
+    cb::unique_item_ptr item(it, cb::ItemDeleter{c->getBucketEngineAsV0()});
+
+    item_info info;
+
+    if (!bucket_get_item_info(c, it, &info)) {
+        LOG_WARNING(c, "%u: Failed to get item info", c->getId());
+        return ENGINE_FAILED;
+    }
+
+    char* root = reinterpret_cast<char*>(info.value[0].iov_base);
+    cb::char_buffer buffer{root, info.value[0].iov_len};
+    cb::compression::Buffer inflated;
+
+    if (c->isDcpNoValue() && !c->isDcpXattrAware()) {
+        // The client don't want the body or any xattrs.. just
+        // drop everything
+        buffer.len = 0;
+        info.datatype = PROTOCOL_BINARY_RAW_BYTES;
+    } else if (!c->isDcpNoValue() && c->isDcpXattrAware()) {
+        // The client want both value and xattrs.. we don't need to
+        // do anything
+
+    } else {
+        // we want either values or xattrs
+        if (mcbp::datatype::is_snappy(info.datatype)) {
+            if (!cb::compression::inflate(
+                cb::compression::Algorithm::Snappy,
+                buffer.buf, buffer.len, inflated)) {
+                LOG_WARNING(c, "%u: Failed to inflate document",
+                            c->getId());
+                return ENGINE_FAILED;
+            }
+
+            // @todo figure out this one.. Right now our tempAlloc list is
+            //       memory allocated by cb_malloc... it would probably be
+            //       better if we had something similar for new'd memory..
+            buffer.buf = reinterpret_cast<char*>(cb_malloc(inflated.len));
+            if (buffer.buf == nullptr) {
+                return ENGINE_ENOMEM;
+            }
+            buffer.len = inflated.len;
+            memcpy(buffer.buf, inflated.data.get(), buffer.len);
+            if (!c->pushTempAlloc(buffer.buf)) {
+                cb_free(buffer.buf);
+                return ENGINE_ENOMEM;
+            }
+        }
+
+        if (c->isDcpXattrAware()) {
+            if (mcbp::datatype::is_xattr(info.datatype)) {
+                buffer.len = cb::xattr::get_body_offset({buffer.buf, buffer.len});
+                // MB-23085 - Remove all other datatype flags as we're only
+                //            sending the xattrs
+                info.datatype = PROTOCOL_BINARY_DATATYPE_XATTR;
+            } else {
+                buffer.len = 0;
+                info.datatype = PROTOCOL_BINARY_RAW_BYTES;
+            }
+        } else {
+            // we want the body
+            if (mcbp::datatype::is_xattr(info.datatype)) {
+                auto body = cb::xattr::get_body({buffer.buf, buffer.len});
+                buffer.buf = const_cast<char*>(body.buf);
+                buffer.len = body.len;
+                info.datatype &= ~PROTOCOL_BINARY_DATATYPE_XATTR;
+            }
+        }
+    }
+
+    if (!c->reserveItem(it)) {
+        LOG_WARNING(c, "%u: Failed to grow item array", c->getId());
+        return ENGINE_FAILED;
+    }
+
+    // we've reserved the item, and it'll be released when we're done sending
+    // the item.
+    item.release();
+    protocol_binary_request_dcp_mutation packet(c->isDcpCollectionAware(),
+                                                opaque,
+                                                vbucket,
+                                                info.cas,
+                                                info.nkey,
+                                                buffer.len,
+                                                info.datatype,
+                                                by_seqno,
+                                                rev_seqno,
+                                                info.flags,
+                                                info.exptime,
+                                                lock_time,
+                                                nmeta,
+                                                nru,
+                                                collection_len);
+
+    const size_t packetlen =
+            protocol_binary_request_dcp_mutation::getHeaderLength(
+                    c->isDcpCollectionAware());
+    if (c->write.bytes + packetlen + nmeta >= c->write.size) {
+        /* We don't have room in the buffer */
+        return ENGINE_E2BIG;
+    }
+
+    memcpy(c->write.curr, packet.bytes, packetlen);
+    c->addIov(c->write.curr, packetlen);
+    c->write.curr += packetlen;
+    c->write.bytes += packetlen;
+    c->addIov(info.key, info.nkey);
+    c->addIov(buffer.buf, buffer.len);
+
+    memcpy(c->write.curr, meta, nmeta);
+    c->addIov(c->write.curr, nmeta);
+    c->write.curr += nmeta;
+    c->write.bytes += nmeta;
+
+    return ENGINE_SUCCESS;
+}
+
+static inline ENGINE_ERROR_CODE do_dcp_mutation(McbpConnection* conn,
+                                                void* packet) {
+    auto* req = reinterpret_cast<protocol_binary_request_dcp_mutation*>(packet);
+
+    // Collection aware DCP will be sending the collection_len field
+    auto body_offset = protocol_binary_request_dcp_mutation::getHeaderLength(
+            conn->isDcpCollectionAware());
+
+    // Namespace defaults to DefaultCollection for legacy DCP
+    DocNamespace ns = DocNamespace::DefaultCollection;
+    if (conn->isDcpCollectionAware() && req->message.body.collection_len != 0) {
+        // Collection aware DCP sends non-zero collection_len for documents that
+        // are in collections.
+        ns = DocNamespace::Collections;
+    }
+
+    const uint16_t nkey = ntohs(req->message.header.request.keylen);
+    const DocKey key{req->bytes + body_offset, nkey, ns};
+
+    const auto opaque = req->message.header.request.opaque;
+    const auto datatype = req->message.header.request.datatype;
+    const uint64_t cas = ntohll(req->message.header.request.cas);
+    const uint16_t vbucket = ntohs(req->message.header.request.vbucket);
+    const uint64_t by_seqno = ntohll(req->message.body.by_seqno);
+    const uint64_t rev_seqno = ntohll(req->message.body.rev_seqno);
+    const uint32_t flags = req->message.body.flags;
+    const uint32_t expiration = ntohl(req->message.body.expiration);
+    const uint32_t lock_time = ntohl(req->message.body.lock_time);
+    const uint16_t nmeta = ntohs(req->message.body.nmeta);
+    const uint32_t valuelen = ntohl(req->message.header.request.bodylen) -
+                              nkey - req->message.header.request.extlen -
+                              nmeta;
+    cb::const_byte_buffer value{req->bytes + body_offset + nkey, valuelen};
+    cb::const_byte_buffer meta{value.buf + valuelen, nmeta};
+    uint32_t priv_bytes = 0;
+    if (mcbp::datatype::is_xattr(datatype)) {
+        cb::const_char_buffer payload{reinterpret_cast<const char*>(value.buf),
+                                      value.len};
+        cb::byte_buffer buffer{const_cast<uint8_t*>(value.buf),
+                               cb::xattr::get_body_offset(payload)};
+        cb::xattr::Blob blob(buffer);
+        priv_bytes = uint32_t(blob.get_system_size());
+    }
+
+    auto engine = conn->getBucketEngine();
+    return engine->dcp.mutation(conn->getBucketEngineAsV0(), conn->getCookie(),
+                                opaque, key, value, priv_bytes, datatype, cas,
+                                vbucket, flags, by_seqno, rev_seqno, expiration,
+                                lock_time, meta, req->message.body.nru);
+}
+
+void dcp_mutation_executor(McbpConnection* c, void* packet) {
+    ENGINE_ERROR_CODE ret = c->getAiostat();
+    c->setAiostat(ENGINE_SUCCESS);
+    c->setEwouldblock(false);
+
+    if (ret == ENGINE_SUCCESS) {
+        ret = do_dcp_mutation(c, packet);
+    }
+
+    switch (ret) {
+    case ENGINE_SUCCESS:
+        c->setState(conn_new_cmd);
+        break;
+
+    case ENGINE_DISCONNECT:
+        c->setState(conn_closing);
+        break;
+
+    case ENGINE_EWOULDBLOCK:
+        c->setEwouldblock(true);
+        break;
+
+    default:
+        mcbp_write_packet(c, engine_error_2_mcbp_protocol_error(ret));
+    }
+}

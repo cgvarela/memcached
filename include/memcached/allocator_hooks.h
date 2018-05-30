@@ -8,6 +8,7 @@
 #define ALLOCATOR_HOOKS_H
 
 #include <stdint.h>
+#include <stdlib.h>
 
 #ifndef __cplusplus
 #include <stdbool.h>
@@ -23,10 +24,26 @@ typedef struct allocator_ext_stat {
 } allocator_ext_stat;
 
 typedef struct allocator_stats {
+    /* Bytes of memory allocated by the application. Doesn't include allocator
+       overhead or fragmentation. */
     size_t allocated_size;
+
+    /* Bytes of memory reserved by the allocator */
     size_t heap_size;
-    size_t free_size;
+
+    /* free, mapped bytes (contributing to VSZ and RSS) */
+    size_t free_mapped_size;
+
+    /* free, unmapped bytes (contributing to VSZ) */
+    size_t free_unmapped_size;
+
+    /* Memory overhead of the allocator:
+     *   heap_size - allocated_size - free_mapped_size - free_unmapped_size.
+     */
     size_t fragmentation_size;
+
+    /* Array of additional allocator-specific statistics, of size
+       `ext_stats_size` */
     allocator_ext_stat *ext_stats;
     size_t ext_stats_size;
 } allocator_stats;
@@ -87,12 +104,24 @@ typedef struct engine_allocator_hooks_v1 {
      * Returns the total bytes allocated by the allocator. This value
      * may be computed differently based on the allocator in use.
      */
-    size_t (*get_allocation_size)(void*);
+    size_t (*get_allocation_size)(const void*);
 
     /**
      * Fills a buffer with special detailed allocator stats.
      */
     void (*get_detailed_stats)(char*, int);
+
+    /**
+     * Attempts to release free memory back to the OS.
+     */
+    void (*release_free_memory)(void);
+
+    /**
+     * Enables / disables per-thread caching by the allocator
+     * __for the calling thread__. Returns if the thread cache was enabled
+     * before the call.
+     */
+    bool (*enable_thread_cache)(bool enable);
 
 } ALLOCATOR_HOOKS_API;
 

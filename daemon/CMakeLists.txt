@@ -1,0 +1,240 @@
+IF (BREAKPAD_FOUND)
+    IF (WIN32)
+        SET(BREAKPAD_SRCS breakpad_win32.cc)
+    ELSEIF ("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
+        SET(BREAKPAD_SRCS breakpad_linux.cc)
+        # Breakpad has headers (which are dependencies for our breakpad integration
+        # code) that don't compile cleanly as C++11, so the GNU standard is
+        # used instead.
+        SET_SOURCE_FILES_PROPERTIES(breakpad_linux.cc PROPERTIES COMPILE_FLAGS
+                                    ${CB_GNU_CXX11_OPTION})
+    ELSE ()
+        MESSAGE(STATUS "Breakpad not supported on this platform")
+        SET(BREAKPAD_SRCS breakpad_dummy.cc)
+    ENDIF ()
+ELSE ()
+    SET(BREAKPAD_SRCS breakpad_dummy.cc)
+ENDIF ()
+
+CHECK_INCLUDE_FILES(numa.h HAVE_NUMA_H)
+SET(WITH_NUMA True CACHE BOOL "Explicitly set NUMA memory allocation policy")
+IF (HAVE_NUMA_H AND WITH_NUMA)
+    CMAKE_PUSH_CHECK_STATE(RESET)
+    SET(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} numa)
+    CHECK_C_SOURCE_COMPILES("
+         #include <numa.h>
+         int main() {
+            numa_available();
+         }" HAVE_LIBNUMA)
+    CMAKE_POP_CHECK_STATE()
+ENDIF ()
+IF (HAVE_LIBNUMA)
+    SET(NUMA_LIBRARIES numa)
+ENDIF ()
+
+ADD_LIBRARY(memcached_daemon STATIC
+            ${BREAKPAD_SRCS}
+            ${Memcached_SOURCE_DIR}/utilities/protocol2text.cc
+            ${Memcached_SOURCE_DIR}/utilities/string_utilities.cc
+            ${Memcached_SOURCE_DIR}/utilities/terminate_handler.cc
+            $<TARGET_OBJECTS:memory_tracking>
+            breakpad.h
+            buckets.cc
+            buckets.h
+            cmdline.cc
+            cmdline.h
+            config_parse.cc
+            config_parse.h
+            config_util.cc
+            config_util.h
+            connection.cc
+            connection.h
+            connection_listen.cc
+            connection_listen.h
+            connection_mcbp.cc
+            connection_mcbp.h
+            connections.cc
+            connections.h
+            cookie.cc
+            cookie.h
+            datatype.cc
+            datatype.h
+            debug_helpers.cc
+            debug_helpers.h
+            doc_pre_expiry.cc
+            doc_pre_expiry.h
+            dynamic_buffer.cc
+            dynamic_buffer.h
+            enginemap.cc
+            enginemap.h
+            executor.cc
+            executor.h
+            executorpool.cc
+            executorpool.h
+            ioctl.cc
+            ioctl.h
+            libevent_locking.cc
+            libevent_locking.h
+            log_macros.h
+            mc_time.cc
+            mc_time.h
+            mcaudit.cc
+            mcaudit.h
+            mcbp.cc
+            mcbp.h
+            mcbp_executors.cc
+            mcbp_executors.h
+            mcbp_privileges.cc
+            mcbp_privileges.h
+            mcbp_topkeys.cc
+            mcbp_topkeys.h
+            mcbp_validators.cc
+            mcbp_validators.h
+            mcbpdestroybuckettask.h
+            memcached.cc
+            memcached_openssl.cc
+            memcached_openssl.h
+            net_buf.h
+            parent_monitor.cc
+            parent_monitor.h
+            protocol/mcbp/appendprepend_context.cc
+            protocol/mcbp/appendprepend_context.h
+            protocol/mcbp/arithmetic_context.cc
+            protocol/mcbp/arithmetic_context.h
+            protocol/mcbp/collections_set_manifest_executor.cc
+            protocol/mcbp/command_context.h
+            protocol/mcbp/dcp_add_failover_log.cc
+            protocol/mcbp/dcp_add_failover_log.h
+            protocol/mcbp/dcp_add_stream_executor.cc
+            protocol/mcbp/dcp_buffer_acknowledgement_executor.cc
+            protocol/mcbp/dcp_close_stream_executor.cc
+            protocol/mcbp/dcp_control_executor.cc
+            protocol/mcbp/dcp_deletion.cc
+            protocol/mcbp/dcp_deletion.h
+            protocol/mcbp/dcp_expiration.cc
+            protocol/mcbp/dcp_expiration.h
+            protocol/mcbp/dcp_flush_executor.cc
+            protocol/mcbp/dcp_get_failover_log_executor.cc
+            protocol/mcbp/dcp_mutation.cc
+            protocol/mcbp/dcp_mutation.h
+            protocol/mcbp/dcp_noop_executor.cc
+            protocol/mcbp/dcp_open_executor.cc
+            protocol/mcbp/dcp_set_vbucket_state_executor.cc
+            protocol/mcbp/dcp_snapshot_marker_executor.cc
+            protocol/mcbp/dcp_stream_end_executor.cc
+            protocol/mcbp/dcp_stream_req_executor.cc
+            protocol/mcbp/dcp_system_event_executor.cc
+            protocol/mcbp/dcp_system_event_executor.h
+            protocol/mcbp/engine_errc_2_mcbp.cc
+            protocol/mcbp/engine_errc_2_mcbp.h
+            protocol/mcbp/engine_wrapper.cc
+            protocol/mcbp/engine_wrapper.h
+            protocol/mcbp/executors.h
+            protocol/mcbp/gat_context.cc
+            protocol/mcbp/gat_context.h
+            protocol/mcbp/get_cmd_timer_executor.cc
+            protocol/mcbp/get_context.cc
+            protocol/mcbp/get_context.h
+            protocol/mcbp/get_locked_context.cc
+            protocol/mcbp/get_locked_context.h
+            protocol/mcbp/hello_packet_executor.cc
+            protocol/mcbp/list_bucket_executor.cc
+            protocol/mcbp/mutation_context.cc
+            protocol/mcbp/mutation_context.h
+            protocol/mcbp/remove_context.cc
+            protocol/mcbp/remove_context.h
+            protocol/mcbp/select_bucket_executor.cc
+            protocol/mcbp/stats_context.cc
+            protocol/mcbp/stats_context.h
+            protocol/mcbp/steppable_command_context.cc
+            protocol/mcbp/steppable_command_context.h
+            protocol/mcbp/tap_ship_log.cc
+            protocol/mcbp/unlock_context.cc
+            protocol/mcbp/unlock_context.h
+            protocol/mcbp/utilities.cc
+            protocol/mcbp/utilities.h
+            runtime.cc
+            runtime.h
+            sasl_tasks.cc
+            sasl_tasks.h
+            session_cas.cc
+            session_cas.h
+            settings.cc
+            settings.h
+            sslcert.cc
+            sslcert.h
+            ssl_context.h
+            ssl_context_openssl.cc
+            ssl_utils.cc
+            ssl_utils.h
+            statemachine_mcbp.cc
+            statemachine_mcbp.h
+            stats.h
+            subdocument.cc
+            subdocument.h
+            subdocument_context.h
+            subdocument_context.cc
+            subdocument_traits.cc
+            subdocument_traits.h
+            subdocument_validators.cc
+            subdocument_validators.h
+            task.h
+            task.cc
+            thread.cc
+            timing_histogram.cc
+            timing_histogram.h
+            timing_interval.cc
+            timing_interval.h
+            timings.cc
+            timings.h
+            topkeys.cc
+            topkeys.h
+            tracing.cc
+            tracing.h)
+
+ADD_DEPENDENCIES(memcached_daemon generate_audit_descriptors)
+
+TARGET_LINK_LIBRARIES(memcached_daemon
+                      auditd
+                      extmeta
+                      mcd_util
+                      cbsasl
+                      cbcompress
+                      engine_utilities
+                      platform
+                      cJSON
+                      JSON_checker
+                      memcached_rbac
+                      subjson
+                      phosphor
+                      xattr
+                      ${SNAPPY_LIBRARIES}
+                      ${MALLOC_LIBRARIES}
+                      ${LIBEVENT_LIBRARIES}
+                      ${OPENSSL_LIBRARIES}
+                      ${COUCHBASE_NETWORK_LIBS}
+                      ${BREAKPAD_LIBRARIES}
+                      ${NUMA_LIBRARIES}
+                      ${MEMCACHED_EXTRA_LIBS})
+
+ADD_EXECUTABLE(memcached main.cc)
+TARGET_LINK_LIBRARIES(memcached memcached_daemon)
+
+IF (ENABLE_DTRACE)
+    ADD_DEPENDENCIES(memcached_daemon generate_memcached_dtrace_h)
+    IF (DTRACE_NEED_INSTRUMENT)
+        ADD_CUSTOM_COMMAND(TARGET memcached_daemon PRE_LINK
+                           COMMAND
+                           ${DTRACE} -o memcached_dtrace.o
+                                     -G
+                                     -s ${Memcached_SOURCE_DIR}/memcached_dtrace.d
+                                     *.o
+                                     protocol/mcbp/*.o
+                           WORKING_DIRECTORY ${Memcached_BINARY_DIR}/daemon/CMakeFiles/memcached_daemon.dir)
+        SET_TARGET_PROPERTIES(memcached PROPERTIES LINK_FLAGS
+                              "${Memcached_BINARY_DIR}/daemon/CMakeFiles/memcached_daemon.dir/memcached_dtrace.o")
+    ENDIF (DTRACE_NEED_INSTRUMENT)
+ENDIF (ENABLE_DTRACE)
+
+INSTALL(TARGETS memcached
+        RUNTIME DESTINATION bin)

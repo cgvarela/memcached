@@ -1,165 +1,301 @@
-/* -*- Mode: C; tab-width: 4; c-basic-offset: 4; indent-tabs-mode: nil -*- */
-#ifndef MEMCACHED_SERVER_API_H
-#define MEMCACHED_SERVER_API_H
+/* -*- Mode: C++; tab-width: 4; c-basic-offset: 4; indent-tabs-mode: nil -*- */
+/*
+ *     Copyright 2016 Couchbase, Inc.
+ *
+ *   Licensed under the Apache License, Version 2.0 (the "License");
+ *   you may not use this file except in compliance with the License.
+ *   You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *   Unless required by applicable law or agreed to in writing, software
+ *   distributed under the License is distributed on an "AS IS" BASIS,
+ *   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *   See the License for the specific language governing permissions and
+ *   limitations under the License.
+ */
+#pragma once
 #include <inttypes.h>
 
-#include <memcached/types.h>
 #include <memcached/config_parser.h>
+#include <memcached/protocol_binary.h>
+#include <memcached/rbac.h>
+#include <memcached/types.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <string>
 
-    typedef struct {
-        /**
-         * The current time.
-         */
-        rel_time_t (*get_current_time)(void);
-
-        /**
-         * Get the relative time for the given time_t value.
-         */
-        rel_time_t (*realtime)(const time_t exptime);
-
-        /**
-         * Get the absolute time for the given rel_time_t value.
-         */
-        time_t (*abstime)(const rel_time_t exptime);
-
-        /**
-         * Get the server's version number.
-         *
-         * @return the server's version number
-         */
-        const char* (*server_version)(void);
-
-        /**
-         * Generate a simple hash value of a piece of data.
-         *
-         * @param data pointer to data to hash
-         * @param size size of the data to generate the hash value of
-         * @param seed an extra seed value for the hash function
-         * @return hash value of the data.
-         */
-        uint32_t (*hash)(const void *data, size_t size, uint32_t seed);
-
-        /**
-         * parser config options
-         */
-        int (*parse_config)(const char *str, struct config_item items[], FILE *error);
-
-        /**
-         * Request the server to start a shutdown sequence.
-         */
-        void (*shutdown)(void);
-
-        /**
-         * Get the current configuration from the core..
-         * See "stats settings" for a list of legal keywords
-         */
-        bool (*get_config)(struct config_item items[]);
-
-    } SERVER_CORE_API;
-
-    typedef struct {
-        /**
-         * Allocate and deallocate thread-specific stats arrays for
-         * engine-maintained separate stats.
-         */
-        void *(*new_stats)(void);
-        void (*release_stats)(void*);
-
-        /**
-         * Tell the server we've evicted an item.
-         */
-        void (*evicting)(const void *cookie,
-                         const void *key,
-                         int nkey);
-    } SERVER_STAT_API;
+typedef struct {
+    /**
+     * The current time.
+     */
+    rel_time_t (*get_current_time)(void);
 
     /**
-     * Commands to operate on a specific cookie.
+     * Get the relative time for the given time_t value.
      */
-    typedef struct {
-        /**
-         * Retrieve socket file descriptor of the session for the given cookie.
-         *
-         * @param cookie The cookie provided by the frontend
-         *
-         * @return the socket file descriptor of the session for the given cookie.
-         */
-#ifdef WIN32
-        SOCKET (*get_socket_fd)(const void *cookie);
-#else
-        int (*get_socket_fd)(const void *cookie);
-#endif
+    rel_time_t (*realtime)(const time_t exptime);
 
-        /**
-         * Get the auth data for the connection associated with the
-         * given cookie.
-         *
-         * @param cookie The cookie provided by the frontend
-         * @param data Pointer to auth_data_t structure for returning the values
-         *
-         */
-        void (*get_auth_data)(const void *cookie, auth_data_t *data);
+    /**
+     * Get the absolute time for the given rel_time_t value.
+     */
+    time_t (*abstime)(const rel_time_t exptime);
 
-        /**
-         * Store engine-specific session data on the given cookie.
-         *
-         * The engine interface allows for a single item to be
-         * attached to the connection that it can use to track
-         * connection-specific data throughout duration of the
-         * connection.
-         *
-         * @param cookie The cookie provided by the frontend
-         * @param engine_data pointer to opaque data
-         */
-        void (*store_engine_specific)(const void *cookie, void *engine_data);
+    /**
+     * parser config options
+     */
+    int (*parse_config)(const char* str,
+                        struct config_item items[],
+                        FILE* error);
 
-        /**
-         * Retrieve engine-specific session data for the given cookie.
-         *
-         * @param cookie The cookie provided by the frontend
-         *
-         * @return the data provied by store_engine_specific or NULL
-         *         if none was provided
-         */
-        void *(*get_engine_specific)(const void *cookie);
+    /**
+     * Request the server to start a shutdown sequence.
+     */
+    void (*shutdown)(void);
 
-        /**
-         * Let a connection know that IO has completed.
-         * @param cookie cookie representing the connection
-         * @param status the status for the io operation
-         */
-        void (*notify_io_complete)(const void *cookie,
-                                   ENGINE_ERROR_CODE status);
+    /**
+     * Get the maximum size of an iovec the core supports receiving
+     * through the item_info structure. The underlying engine may
+     * support using more entries to hold its data internally, but
+     * when making the data available for the core it must fit
+     * within these limits.
+     */
+    size_t (*get_max_item_iovec_size)(void);
+} SERVER_CORE_API;
 
-        /**
-         * Notify the core that we're holding on to this cookie for
-         * future use. (The core guarantees it will not invalidate the
-         * memory until the cookie is invalidated by calling release())
-         */
-        ENGINE_ERROR_CODE (*reserve)(const void *cookie);
+typedef struct {
+    /**
+     * Tell the server we've evicted an item.
+     */
+    void (*evicting)(const void* cookie, const void* key, int nkey);
+} SERVER_STAT_API;
 
-        /**
-         * Notify the core that we're releasing the reference to the
-         * The engine is not allowed to use the cookie (the core may invalidate
-         * the memory)
-         */
-        ENGINE_ERROR_CODE (*release)(const void *cookie);
+/**
+ * Commands to operate on a specific cookie.
+ */
+typedef struct {
+    /**
+     * Store engine-specific session data on the given cookie.
+     *
+     * The engine interface allows for a single item to be
+     * attached to the connection that it can use to track
+     * connection-specific data throughout duration of the
+     * connection.
+     *
+     * @param cookie The cookie provided by the frontend
+     * @param engine_data pointer to opaque data
+     */
+    void (*store_engine_specific)(const void* cookie, void* engine_data);
 
+    /**
+     * Retrieve engine-specific session data for the given cookie.
+     *
+     * @param cookie The cookie provided by the frontend
+     *
+     * @return the data provied by store_engine_specific or NULL
+     *         if none was provided
+     */
+    void* (*get_engine_specific)(const void* cookie);
 
-    } SERVER_COOKIE_API;
+    /**
+     * Check if datatype is supported by the connection.
+     *
+     * @param cookie The cookie provided by the frontend
+     * @param datatype The datatype to test
+     *
+     * @return true if connection supports the datatype or else false.
+     */
+    bool (*is_datatype_supported)(const void* cookie,
+                                  protocol_binary_datatype_t datatype);
+
+    /**
+     * Check if mutation extras is supported by the connection.
+     *
+     * @param cookie The cookie provided by the frontend
+     *
+     * @return true if supported or else false.
+     */
+    bool (*is_mutation_extras_supported)(const void* cookie);
+
+    /**
+     * Check if collections are supported by the connection.
+     *
+     * @param cookie The cookie provided by the frontend
+     *
+     * @return true if supported or else false.
+     */
+    bool (*is_collections_supported)(const void* cookie);
+
+    /**
+     * Retrieve the opcode of the connection, if
+     * ewouldblock flag is set. Please note that the ewouldblock
+     * flag for a connection is cleared before calling into
+     * the engine interface, so this method only works in the
+     * notify hooks.
+     *
+     * @param cookie The cookie provided by the frontend
+     *
+     * @return the opcode from the binary_header saved in the
+     * connection.
+     */
+    uint8_t (*get_opcode_if_ewouldblock_set)(const void* cookie);
+
+    /**
+     * Validate given ns_server's session cas token against
+     * saved token in memached, and if so incrment the session
+     * counter.
+     *
+     * @param cas The cas token from the request
+     *
+     * @return true if session cas matches the one saved in
+     * memcached
+     */
+    bool (*validate_session_cas)(const uint64_t cas);
+
+    /**
+     * Decrement session_cas's counter everytime a control
+     * command completes execution.
+     */
+    void (*decrement_session_ctr)(void);
+
+    /**
+     * Let a connection know that IO has completed.
+     * @param cookie cookie representing the connection
+     * @param status the status for the io operation
+     */
+    void (*notify_io_complete)(const void* cookie, ENGINE_ERROR_CODE status);
+
+    /**
+     * Notify the core that we're holding on to this cookie for
+     * future use. (The core guarantees it will not invalidate the
+     * memory until the cookie is invalidated by calling release())
+     */
+    ENGINE_ERROR_CODE (*reserve)(const void* cookie);
+
+    /**
+     * Notify the core that we're releasing the reference to the
+     * The engine is not allowed to use the cookie (the core may invalidate
+     * the memory)
+     */
+    ENGINE_ERROR_CODE (*release)(const void* cookie);
+
+    /**
+     * Set the priority for this connection
+     */
+    void (*set_priority)(const void* cookie, CONN_PRIORITY priority);
+
+    /**
+     * Get the bucket the connection is bound to
+     *
+     * @cookie The connection object
+     * @return the bucket identifier for a cookie
+     */
+    bucket_id_t (*get_bucket_id)(const void* cookie);
+
+    /**
+     * Get connection id
+     *
+     * @param cookie the cookie sent to the engine for an operation
+     * @return a unique identifier for a connection
+     */
+    uint64_t (*get_connection_id)(const void* cookie);
+
+    /**
+     * Check if the cookie have the specified privilege in it's
+     * active set.
+     *
+     * @todo We should probably add the key we want to access as part
+     *       of the API. We're going to need that when we're adding
+     *       support for collections. For now let's assume that it
+     *       won't be a big problem to fix that later on.
+     * @param cookie the cookie sent to the engine for an operation
+     * @param privilege the privilege to check for
+     * @return true if the cookie have the privilege in its active set,
+     *         false otherwise
+     */
+    cb::rbac::PrivilegeAccess (*check_privilege)(
+            const void* cookie, const cb::rbac::Privilege privilege);
+
+    /**
+     * Method to map an engine error code to the appropriate mcbp response
+     * code (the client may not support all error codes so we may have
+     * to remap some).
+     *
+     * @param cookie the client cookie (to look up the client connection)
+     * @param code the engine error code to get the mcbp response code.
+     * @return the mcbp response status to use
+     * @throws std::engine_error if the error code results in being
+     *                           ENGINE_DISCONNECT after remapping
+     *         std::logic_error if the error code doesn't make sense
+     *         std::invalid_argument if the code doesn't exist
+     */
+    protocol_binary_response_status (*engine_error2mcbp)(
+            const void* cookie, ENGINE_ERROR_CODE code);
+
+    /**
+     * Get the log information to be used for a log entry.
+     *
+     * The typical log entry from the core is:
+     *
+     *  `id> message` - Data read from ta client
+     *  `id: message` - Status messages for this client
+     *  `id< message` - Data sent back to the client
+     *
+     * If the caller wants to dump more information about the connection
+     * (like socket name, peer name, user name) the pair returns this
+     * info as the second field. The info may be invalidated by the core
+     * at any time (but not while the engine is operating in a single call
+     * from the core) so it should _not_ be cached.
+     */
+    std::pair<uint32_t, std::string> (*get_log_info)(const void* cookie);
+
+} SERVER_COOKIE_API;
+
+struct SERVER_DOCUMENT_API {
+    /**
+     * This callback is called from the underlying engine right before
+     * it is linked into the list of available documents (it is currently
+     * not visible to anyone). The engine should have validated all
+     * properties set in the document by the client and the core, and
+     * assigned a new CAS number for the document (and sequence number if
+     * the underlying engine use those).
+     *
+     * The callback may at this time do post processing of the document
+     * content (it is allowed to modify the content data, but not
+     * reallocate or change the size of the data in any way).
+     *
+     * Given that the engine MAY HOLD LOCKS when calling this function
+     * the core is *NOT* allowed to acquire *ANY* locks (except for doing
+     * some sort of memory allocation for a temporary buffer).
+     *
+     * @param cookie The cookie provided to the engine for the storage
+     *               command which may (which may hold more context)
+     * @param info the items underlying data
+     * @return ENGINE_SUCCESS means that the underlying engine should
+     *                        proceed to link the item. All other
+     *                        error codes means that the engine should
+     *                        *NOT* link the item
+     */
+    ENGINE_ERROR_CODE (*pre_link)(const void* cookie, item_info& info);
+
+    /**
+     * This callback is called from the underlying engine right before
+     * a particular document expires. The callback is responsible for
+     * modifying the contents of the itm_info passed in. The updated
+     * total size is available in itm_info.nbytes.
+     *
+     * @param itm_info info pertaining to the item that is to be expired.
+     * @return true indicating that the info has been modified in itm_info.
+     *         false indicating that there is no data available in itm_info.
+     * @throws std::bad_alloc in case of memory allocation failure
+     * @throws std::logic_error if the data has grown
+     */
+    bool (*pre_expiry)(item_info& itm_info);
+};
 
 #ifdef WIN32
 #undef interface
 #endif
 
-    typedef SERVER_HANDLE_V1* (*GET_SERVER_API)(void);
-
-#ifdef __cplusplus
+extern "C" {
+typedef SERVER_HANDLE_V1* (* GET_SERVER_API)(void);
 }
-#endif
-
-#endif

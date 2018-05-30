@@ -78,7 +78,9 @@ extern "C" {
         EXTENSION_LOG_DETAIL,
         EXTENSION_LOG_DEBUG,
         EXTENSION_LOG_INFO,
-        EXTENSION_LOG_WARNING
+        EXTENSION_LOG_NOTICE,
+        EXTENSION_LOG_WARNING,
+        EXTENSION_LOG_FATAL
     } EXTENSION_LOG_LEVEL;
 
     /**
@@ -109,6 +111,16 @@ extern "C" {
         void (*log)(EXTENSION_LOG_LEVEL severity,
                     const void* client_cookie,
                     const char *fmt, ...);
+        /**
+         * Tell the logger to shut down (flush buffers, close files etc)
+         * @param force If true, attempt to forcefully shutdown as quickly as
+         *              possible - don't assume any other code (e.g. background
+         *              threads) will be run after this call.
+         *              Note: This is designed for 'emergency' situations such
+         *              as a fatal signal raised, where we want to try and get
+         *              any pending log messages written before we die.
+         */
+        void (*shutdown)(bool force);
     } EXTENSION_LOGGER_DESCRIPTOR;
 
     typedef struct {

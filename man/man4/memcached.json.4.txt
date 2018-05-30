@@ -9,10 +9,91 @@ memcached.json - memcached configuration file
 == DESCRIPTION
 
 *memcached.json* is a JSON encoded file specifying the properties
-used to configure the memcached server.
+used to configure the memcached server. Some of the parameters
+may be changed at runtime by instructing memcached to reread the
+configuration file. These properties is explicitly marked as
+such.
 
 The following sections describes the various attributes that may
 be specified.
+
+=== root
+
+This is the root directory of the Couchbase server installation.
+
+=== breakpad
+
+The *breakpad* attribute is used to configure the Breakpad crash
+catcher. When enabled (and on a supported platform), if memcached
+crashes a minidump containing information on the state of memcached
+will be written to disk.
+It is an object with the following attributes:
+
+    enabled       A boolean value specifying if Breakpad is enabled.
+                  If true (and *minidump_dir* is set) minidumps will
+                  be output to directory specified by *minidump_dir*.
+                  If not specified then defaults to false.
+
+    minidump_dir  A string value specifying the directory to write any
+                  outputted minidumps to.  If not specified then
+                  Breakpad is not enabled.
+
+    content       A string value specifying what data will be included
+                  in generated minidumps. Currently the only permitted
+                  value is "default".
+
+*enabled*, *minidump_dir* and *content* may be modified at runtime by
+instructing memcached to reread the configuration file.
+
+=== require_init
+
+The *require_init* attribute is a boolean value that is used to
+disable disable all user commands while the server (Couchbase Server)
+is initializing the node (creating the buckets etc). Until the node is
+initialized memcached will only allow the "admin user" to connect to
+the cluster and run commands. All other users will receive a "NOT
+INITIALIZED" response for all commands except SASL requests; which
+will be allowed, but upon a successful authentication "NOT
+INITIALIZED" will be returned unless the SASL authentication was done
+for the admin user.
+
+=== audit_file
+
+Specify the filename containing all of the Audit configurations
+
+=== rbac_file
+
+Specify the filename containing the RBAC database.
+
+=== privilege_debug
+
+The *privilege_debug* attribute is a boolean value that may be set
+(in development) to make all missing privilege calls return success
+(and the missing privilege is logged). See docs/rbac.md for more
+information.
+
+=== ssl_cipher_list
+
+Specify the list of ciphers to use. The format of the string is
+described in ciphers ( https://www.openssl.org/docs/apps/ciphers.html
+). By default no value is specified causing whatever openssl defaults
+to to be enabled. Some values may be:
+
+    HIGH          Only enable "high" encrypthion ciphers (keys > 128
+                  bits)
+
+    MEDIUM        In addition to the high encryption ciphers, also
+                  allow 128 bit encryption
+
+=== ssl_minimum_protocol
+
+Specify the minimum protocol allowed for ssl. The default disables
+SSLv2 and SSLv3 and allows for TLSv1, TLSv1.1 and TLSv1.2. The
+string is case insensitive, and the following values may be used:
+
+    TLSv1              Allow TLSv1, TLSv1.1 and TLSv1.2
+    TLSv1.1/TLSv1_1    Allow TLSv1.1 and TLSv1.2
+    TLSv1.2/TLSv1_2    Allow TLSv1.2
 
 === threads
 
@@ -40,7 +121,7 @@ object describing a single interface with the following properties:
                   or not. By default IPv6 is enabled.
 
     maxconn       An integral number specifying the maximum number of
-                  concurrent clients that may be connected
+                  concurrent clients that may be connected.
 
     backlog       An integral number specifying the backlog size
                   set to listen.
@@ -51,13 +132,27 @@ object describing a single interface with the following properties:
     ssl           An object specifying SSL related properties.
                   See below.
 
+    management    A boolean value if this interface is used by the
+                  management system. If `init_complete` is set to
+                  true memcached will only enable management interfaces
+                  until it receives INIT_COMPLETE
+
+    protocol      A string value specifying the protocol enabled
+                  for this port. If not present the memcached binary
+                  protocol is used. Legal values: "greenstack" or
+                  "memcached"
+
 The *ssl* object contains the two *mandatory* attributes:
 
     key           A string value with the absolute path to the
-	          file containing the private key to use
+	          file containing the private key to use.
 
     cert          A string value with the absolute path to the
                   file containing the X.509 certificate to use.
+
+*maxconn*, *backlog*, *tcp_nodelay*, *ssl.key* and *ssl.cert* may
+be modified by instructing memcached to reread the configuration
+file.
 
 === extensions
 
@@ -76,17 +171,7 @@ object describing a single extension with the following attributes:
 
 === engine
 
-The *engine* attribute is used to specify the engine to load. It is
-an object with the following attributes:
-
-    module    A string value containing the module to load. This may
-              either be an absolute path, or the systems library path
-              will be searched for the object. The object must
-              implement the engine api.
-
-    config    A string value containing configuration attributes to
-              the module. The config value is passed transparently
-              to the module.
+The *engine* parameter is no longer used and ignored.
 
 === require_sasl
 
@@ -94,33 +179,50 @@ The *require_sasl* attribute specify if performing SASL authentication
 is required or not. The value is a boolean value which is set to false
 by default.
 
-=== prefix_delimiter
+=== default_reqs_per_event
 
-The *prefix_delimiter* attribute is used to specify the delimiter
-character used for detailed statistics. By default it is set to
-':'. The value is specified as a string value, but must not exceed 1
-character in length. This parameter is part of the inheritage from
-memcached and should not be used unless you know what you're doing.
-
-=== allow_detailed
-
-The *allow_detailed* attribute is used to control the accessibility of
-the stats detailed command. By default it is set to true. This
-parameter is part of the inheritage from memcached and should not be
-used unless you know what you're doing.
-
-=== detail_enabled
-
-The *detail_enabled* attribute is used to control if detailed stats is
-collected. By default it is set to false. This parameter is part of
-the inheritage from memcached and should not be used unless you know
-what you're doing.
-
-=== reqs_per_event
-
-The *reqs_per_event* attribute is an integral value specifying the
-number of request that may be served per client before serving
+The *default_reqs_per_event* attribute is an integral value specifying
+the number of request that may be served per client before serving
 the next client (to avoid starvation). The default value is 20.
+
+*default_reqs_per_event* may be updated by instructing memcached to
+reread the configuration file.
+
+=== reqs_per_event_high_priority
+
+The *reqs_per_event_high_priority* attribute is an integral value
+specifying the number of request that may be served per high priority
+client before serving the next client (to avoid starvation). The
+default value is 20.
+
+*reqs_per_event_high_priority* may be updated by instructing memcached
+to reread the configuration file.
+
+=== reqs_per_event_med_priority
+
+The *reqs_per_event_med_priority* attribute is an integral value
+specifying the number of request that may be served per medium priority
+client before serving the next client (to avoid starvation). The
+default value is 20.
+
+*reqs_per_event_med_priority* may be updated by instructing memcached
+to reread the configuration file.
+
+=== reqs_per_event_low_priority
+
+The *reqs_per_event_low_priority* attribute is an integral value
+specifying the number of request that may be served per low priority
+client before serving the next client (to avoid starvation). The
+default value is 20.
+
+*reqs_per_event_low_priority* may be updated by instructing memcached
+to reread the configuration file.
+
+=== bio_drain_buffer_sz
+
+The *bio_drain_buffer_sz* attribute is an integral value specifying
+the number of bytes in the BIO drain buffer. This is an interal
+setting just used by the engineers for testing.
 
 === verbosity
 
@@ -130,69 +232,174 @@ set to 0 resulting in only warnings to be emitted. Setting this
 value too high will produce a lot of output which is most likely
 meaningless for most people.
 
-=== lock_memory
+*verbosity* may be updated by instructing memcached to reread
+the configuration file.
 
-The *lock_memory* attribute is a boolean value used to control if
-memcached should try to lock memory pages into memory. By default this
-option is set to false. Failure to lock memory is not treated as a
-fatal error. Beware that locking memory pages may not necessarily
-result in a better overall performance. Use with care.
+=== connection_idle_time
 
-=== large_memory_pages
+The *connection_idle_time* attribute is an integral value specifying the
+number of seconds a connection may be idle until the server will disconnect.
 
-The *large_memory_pages* attribute is a boolean value used to enable
-the request for large memory pages. Using large memory pages may result
-in a reduction of TLB misses, but it does require the underlying engine
-to allocate memory in big chunks (see the preallocate attribute for
-the default_engine). By default this is disabled.
+By default the connection idle time is set to 5 minutes.
 
-=== daemonize
+*connection_idle_time* may be updated by instructing memcached to reread the
+configuration file.
 
-The *daemonize* attribute is a boolean value used to specify if memcached
-should be started as a daemon or not (detach from the tty) on platform
-which support this.  By default this value is set to false.
+=== datatype_json
 
-=== pid_file
+The *datatype_json* attribute is a boolean value to enable the support
+for using the datatype JSON extension. By default this support is *disabled*.
 
-The *pid_file* attribute is a string value specifying a file to store
-the process id. By default this value is not specified.
+=== datatype_snappy
+
+The *datatype_snappy* attribute is a boolean value to enable the support
+for using the datatype snappy extension. By default this support is
+*disabled*.
+
+=== max_packet_size
+
+The *max_packet_size* attribute is an integer value that specify the
+maximum packet size (in MB) allowed to be received from clients without
+disconnecting them. This is a safetynet for avoiding the server to
+try to spool up a 4GB packet. When a packet is received on the
+network with a body bigger than this threshold EINVAL is returned
+to the client and the client is disconnected.
+
+=== stdin_listen
+
+The *stdin_listen* attribute is a boolean value that makes memcached
+listen to stdin (as well as the defined ports).
+Development only feature as it forces libevent to avoid epoll.
+
+=== exit_on_connection_close
+
+The *exit_on_connection_close* attribute is a boolean value that makes
+memcached exit with exit code 0 whenever a connection close.
+
+This is required for afl-fuzz as it expects the
+process to exit cleanly when a test is complete.
+
+So when memcached reads 0 bytes (EOF) from stdin it will close
+the connection and in turn exit(0).
+
+=== saslauthd_socketpath
+
+The *saslauthd_socketpath* attribute is a string value containing
+the path to the socket file used by saslauthd. If not specified
+the value */var/run/saslauthd/mux* is used.
+
+=== sasl_mechanisms
+
+the *sasl_mechanisms* attribute is a string value containing the SASL
+mechanisms that should be available for clients. It is not a dynamic
+value and require restart in order to change.
+
+=== ssl_sasl_mechanisms
+
+the *ssl_sasl_mechanisms* attribute is a string value containing the SASL
+mechanisms that should be available for clients connecting over SSL.
+It is not a dynamic value and require restart in order to change.
+By default this value is set to PLAIN (the default value may be cleared
+by setting the environment variable `COUCHBASE_I_DONT_TRUST_SSL` to a
+non-null value.
+
+=== client_cert_auth
+
+The client_cert_auth object is used to enable client certificate
+authentication and control how the username is extracted from the client
+certificate. It contains the following attributes.
+
+*state*. Possible values for this paramters can be disabled,
+enabled or mandatory. When enabled, if the server will request a
+certificate from the client but if the certificate cannot be verified
+it will stil allow the connection. In mandatory mode, the client connection
+is dropped if the client certificate cannot be verified.
+
+The path attribute specifies the field which will be used to extract the
+username from the certificate and map that to user defined in Couchbase.
+Currently only subject.cn, san.uri, san.email and san.dnsname are allowed.
+This attribute is optional, however if defined, then the provided client
+certificates must contain the fields which is used for the mapping,
+*and the user must* be defined in Couchbase for the connection to be
+established.
+
+The prefix attribute specifices the prefix value to be ignored while
+extracting the username from the certificate.
+
+The delimiter attribute can be a string of characters and the parsing
+of the username ends when one of the characters in the string is found.
+
+=== dedupe_nmvb_maps
+
+The *dedupe_nmvb_maps* attribute is a boolean value to enable deduplication
+of the cluster maps in the "Not My VBucket" response messages sent to
+the clients. By default this value is set to false.
+
+=== error_maps_dir
+
+A directory containing one or more JSON-formatted error maps. The error maps
+are returned to the client using the GET_ERROR_MAP protocol command.
+Multiple error maps correspond to multiple versions.
+
+The format of the error map itself is described in `docs/ErrorMap.md`
+
+=== xattr_enabled
+
+The *xattrs_enabled* attribute is a boolean value to enable or disable
+the use of extended attributes on documents. It may be overridden by
+privileged connections to allow them to set up replication streams
+before users create them.
 
 == EXAMPLES
 
 A Sample memcached.json:
 
     {
+        "root" : "/opt/couchbase",
+        "breakpad" :
+            {
+                "enabled" : true,
+                "minidump_dir" : "/opt/couchbase/var/crash",
+                "content" : "default"
+            },
+        "require_init" : true,
+        "audit_file" : "/opt/couchbase/etc/security/audit.json",
+        "rbac_file" : "/opt/couchbase/etc/security/rbac.json",
+        "privilege_debug" : false,
+        "error_maps_dir": "/opt/couchbase/etc/error_maps",
+        "ssl_cipher_list" : "HIGH",
         "threads" : 4,
         "interfaces" :
         [
             {
-                "maxconn" : 1000,
-                "port" : 11310,
-                "backlog" : 1024,
                 "host" : "*",
+                "port" : 11209,
                 "IPv4" : true,
                 "IPv6" : true,
+                "maxconn" : 10000,
+                "backlog" : 1024,
                 "tcp_nodelay" : true,
                 "ssl" :
                 {
                     "key" : "/etc/memcached/pkey",
                     "cert" : "/etc/memcached/cert"
-                }
+                },
+                "protocol" : "memcached"
             },
             {
-                "maxconn" : 10000,
-                "port" : 11210,
-                "backlog" : 1024,
                 "host" : "*",
+                "port" : 11210,
                 "IPv4" : true,
                 "IPv6" : true,
-                "tcp_nodelay" : true
-            },
-            {
-                "maxconn" : 1000,
-                "port" : 11213,
-                "host" : "127.0.0.1",
-                "IPv6" : false
+                "maxconn" : 10000,
+                "backlog" : 1024,
+                "tcp_nodelay" : true,
+                "ssl" :
+                {
+                    "key" : "/etc/memcached/pkey",
+                    "cert" : "/etc/memcached/cert"
+                },
+                "protocol" : "greenstack"
             }
         ],
         "extensions" :
@@ -211,17 +418,21 @@ A Sample memcached.json:
             "config" : "admin=_admin;default_bucket_name=default;auto_create=false"
         },
         "require_sasl" : false,
-        "prefix_delimiter" : ":",
-        "allow_detailed" : true,
-        "detail_enabled" : false,
-        "reqs_per_event" : 20,
-        "verbosity" : 0,
-        "lock_memory" : false,
-        "large_memory_pages" : false,
-        "daemonize" : false,
-        "pid_file" : "/var/run/memcached.pid"
+        "default_reqs_per_event" : 20,
+        "reqs_per_event_high_priority" : 40,
+        "reqs_per_event_med_priority" : 20,
+        "reqs_per_event_low_priority" : 10,
+        "verbosity" : 2,
+        "datatype_json" : true,
+        "datatype_snappy" : true,
+        "max_packet_size" : 25,
+        "bio_drain_buffer_sz" : 8192,
+        "sasl_mechanisms" : "SCRAM-SHA512 SCRAM-SHA256 SCRAM-SHA1",
+        "saslauthd_socketpath" : "/var/run/saslauthd/mux",
+        "dedupe_nmvb_maps" : true,
+        "xattr_enabled" : true
     }
 
 == COPYRIGHT
 
-Copyright 2014 Couchbase, Inc.
+Copyright 2016 Couchbase, Inc.
